@@ -239,7 +239,7 @@ fn resolve_dir_param(dir: &str, work_dir: &RcNode) -> Result<RcNode, &'static st
                     let child = c.borrow();
                     child.name() == dir && child.node_type() == 'D'
                 })
-                .map(|c| Rc::clone(&c))
+                .map(Rc::clone)
                 .ok_or("\x1b[31mError:\x1b[0m Directory not found!"),
         }
     }
@@ -285,12 +285,12 @@ pub fn cat_command(file: &str, work_dir: &RcNode) {
 
 pub fn write_command(file: &str, new_content: &str, work_dir: &RcNode) {
     match &*work_dir.borrow() {
-        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m {name} is not a directory!"),
+        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m '{name}' is not a directory!"),
         Node::Directory { children, .. } => match children.iter().find(|n| {
             let node = n.borrow();
             node.name() == file && node.node_type() == 'F'
         }) {
-            None => eprintln!("\x1b[31mError:\x1b[0m Cannot find file '{file}'!"),
+            None => eprintln!("\x1b[31mError:\x1b[0m Cannot find '{file}'!"),
             Some(file) => match &mut *file.borrow_mut() {
                 Node::Directory { name, .. } => {
                     eprintln!("\x1b[31mError:\x1b[0m {name} is not a file!")
@@ -308,6 +308,26 @@ pub fn rm_command(name: &str, work_dir: &RcNode) {
             match children.iter().position(|n| n.borrow().name() == name) {
                 None => eprintln!("\x1b[31mError:\x1b[0m Cannot find {name}!"),
                 Some(index) => _ = children.swap_remove(index),
+            }
+        }
+    }
+}
+
+pub fn mv_command(name: &str, new_name: &str, work_dir: &RcNode) {
+    match &*work_dir.borrow() {
+        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m '{name}' is not a directory!"),
+        Node::Directory { children, .. } => {
+            if children.iter().any(|c| c.borrow().name() == new_name) {
+                eprintln!("\x1b[31mError:\x1b[0m '{new_name}' already exist'");
+                return;
+            }
+
+            match children.iter().find(|c| c.borrow().name() == name) {
+                None => eprintln!("\x1b[31mError:\x1b[0m Cannot find '{name}'"),
+                Some(node) => match &mut *node.borrow_mut() {
+                    Node::File { name, .. } => *name = new_name.into(),
+                    Node::Directory { name, .. } => *name = new_name.into(),
+                },
             }
         }
     }

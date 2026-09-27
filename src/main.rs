@@ -44,7 +44,7 @@ fn main() {
                 Command::Cat(file) => node::cat_command(&file, &work_dir),
                 Command::Write(file, content) => node::write_command(&file, &content, &work_dir),
                 Command::Rm(name) => node::rm_command(&name, &work_dir),
-                Command::Mv(_name, _new_name) => println!("TODO: implement mv (rename)"),
+                Command::Mv(name, new_name) => node::mv_command(&name, &new_name, &work_dir),
                 Command::Tree(_dir) => println!("TODO: implement tree"),
             },
         }
