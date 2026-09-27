@@ -130,14 +130,13 @@ fn smart_split(text: &str) -> Vec<String> {
     for c in text.chars() {
         match c {
             '"' => quoted = !quoted,
-            ' ' => {
-                if quoted {
-                    word_buffer.push(c);
-                } else {
-                    parts.push(word_buffer.clone());
-                    word_buffer = String::new();
+
+            c if c.is_whitespace() && !quoted => {
+                if !word_buffer.is_empty() {
+                    parts.push(std::mem::take(&mut word_buffer))
                 }
             }
+
             _ => word_buffer.push(c),
         }
     }
