@@ -1,3 +1,4 @@
+mod error;
 mod node;
 
 use std::cell::RefCell;
@@ -16,13 +17,13 @@ fn main() {
             node::pwd_command(&work_dir)
         );
         if let Err(err) = std::io::stdout().flush() {
-            eprintln!("\x1b[31mError:\x1b[0m {err}");
+            error::error(&format!("{err}"));
             continue;
         }
 
         let mut command = String::new();
         if let Err(err) = std::io::stdin().read_line(&mut command) {
-            eprintln!("\x1b[31mError:\x1b[0m {err}");
+            error::error(&format!("{err}"));
             continue;
         } else {
             command = command.trim().into();
@@ -33,7 +34,7 @@ fn main() {
         }
 
         match Command::parse(&command) {
-            Err(err) => eprintln!("\x1b[31mError:\x1b[0m {err}"),
+            Err(err) => error::error(&err),
             Ok(cmd) => match cmd {
                 Command::Exit => break,
                 Command::Pwd => println!("{}", node::pwd_command(&work_dir)),

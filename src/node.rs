@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
+use crate::error::*;
+
 type RcNode = Rc<RefCell<Node>>;
 
 pub enum Node {
@@ -148,15 +150,15 @@ fn smart_split(text: &str) -> Vec<String> {
     parts
 }
 
-pub fn mkdir_command(dir_name: &str, work_dir: &RcNode) {
+pub fn mkdir_command(dir: &str, work_dir: &RcNode) {
     match &mut *work_dir.borrow_mut() {
-        Node::File { name, .. } => eprintln!("{name} is not a directory!"),
+        Node::File { .. } => work_dir_not_dir(),
         Node::Directory { children, .. } => {
-            if children.iter().any(|c| c.borrow().name() == dir_name) {
-                eprintln!("{dir_name} already exists!");
+            if children.iter().any(|c| c.borrow().name() == dir) {
+                already_exists(dir);
             } else {
                 children.push(Rc::new(RefCell::new(Node::Directory {
-                    name: dir_name.into(),
+                    name: dir.into(),
                     children: Vec::new(),
                     parent: Some(Rc::downgrade(work_dir)),
                 })));
@@ -194,16 +196,16 @@ fn path_rec(node: &Option<Weak<RefCell<Node>>>, folders: &mut Vec<String>) {
 pub fn ls_command(dir: &Option<String>, work_dir: &RcNode) {
     match dir {
         None => match &*work_dir.borrow() {
-            Node::File { .. } => eprintln!("\x1b[31mError:\x1b[0m Not a directory!"),
+            Node::File { .. } => work_dir_not_dir(),
             Node::Directory { children, .. } => print_children(children),
         },
-        Some(dir) => match resolve_dir_param(dir, work_dir) {
-            Err(err) => eprintln!("{err}"),
-            Ok(dir) => match &*dir.borrow() {
-                Node::File { .. } => eprintln!("\x1b[31mError:\x1b[0m Not a directory!"),
-                Node::Directory { children, .. } => print_children(children),
-            },
-        },
+        Some(dir) => {
+            if let Ok(dir) = resolve_dir_param(dir, work_dir)
+                && let Node::Directory { children, .. } = &*dir.borrow()
+            {
+                print_children(children);
+            }
+        }
     }
 }
 
@@ -215,42 +217,45 @@ fn print_children(children: &[RcNode]) {
 }
 
 pub fn cd_command(dir: &str, work_dir: &mut RcNode) {
-    match resolve_dir_param(dir, work_dir) {
-        Err(err) => eprintln!("{err}"),
-        Ok(target_dir) => *work_dir = target_dir,
+    if let Ok(target_dir) = resolve_dir_param(dir, work_dir) {
+        *work_dir = target_dir;
     }
 }
 
-fn resolve_dir_param(dir: &str, work_dir: &RcNode) -> Result<RcNode, &'static str> {
+fn resolve_dir_param(dir: &str, work_dir: &RcNode) -> Result<RcNode, ()> {
     if dir == ".." {
         match work_dir.borrow().parent() {
-            None => Err("\x1b[31mError:\x1b[0m No parent directory!"),
-            Some(parent) => parent
-                .upgrade()
-                .map(|p| Rc::clone(&p))
-                .ok_or("\x1b[31mError:\x1b[0m Parent node is dropped!"),
+            None => {
+                no_parent_dir();
+                Err(())
+            }
+            Some(parent) => parent.upgrade().ok_or(()).map_err(|_| parent_dropped()),
         }
     } else {
         match &*work_dir.borrow() {
-            Node::File { .. } => Err("\x1b[31mError:\x1b[0m Not a directory!"),
+            Node::File { .. } => {
+                work_dir_not_dir();
+                Err(())
+            }
             Node::Directory { children, .. } => children
                 .iter()
-                .find(|c| {
-                    let child = c.borrow();
-                    child.name() == dir && child.node_type() == 'D'
+                .find(|c| match &*c.borrow() {
+                    Node::File { .. } => false,
+                    Node::Directory { name, .. } => name == dir,
                 })
                 .map(Rc::clone)
-                .ok_or("\x1b[31mError:\x1b[0m Directory not found!"),
+                .ok_or(())
+                .map_err(|_| not_found(dir)),
         }
     }
 }
 
 pub fn touch_command(file: &str, work_dir: &RcNode) {
     match &mut *work_dir.borrow_mut() {
-        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m {name} is not a directory!"),
+        Node::File { .. } => work_dir_not_dir(),
         Node::Directory { children, .. } => {
             if children.iter().any(|c| c.borrow().name() == file) {
-                eprintln!("\x1b[31mError:\x1b[0m {file} already exists!");
+                already_exists(file);
             } else {
                 children.push(Rc::new(RefCell::new(Node::File {
                     name: file.into(),
@@ -273,40 +278,38 @@ pub fn cat_command(file: &str, work_dir: &RcNode) {
             .map(Rc::clone),
     };
     match target_file {
-        None => eprintln!("\x1b[31mError:\x1b[0m File '{file}' not found!"),
-        Some(file) => match &*file.borrow() {
-            Node::Directory { name, .. } => {
-                eprintln!("\x1b[31mError:\x1b[0m {name} is not a file!")
+        None => not_found(file),
+        Some(file) => {
+            if let Node::File { content, .. } = &*file.borrow() {
+                println!("{content}");
             }
-            Node::File { content, .. } => println!("{content}"),
-        },
+        }
     }
 }
 
 pub fn write_command(file: &str, new_content: &str, work_dir: &RcNode) {
     match &*work_dir.borrow() {
-        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m '{name}' is not a directory!"),
-        Node::Directory { children, .. } => match children.iter().find(|n| {
-            let node = n.borrow();
-            node.name() == file && node.node_type() == 'F'
+        Node::File { .. } => work_dir_not_dir(),
+        Node::Directory { children, .. } => match children.iter().find(|n| match &*n.borrow() {
+            Node::Directory { .. } => false,
+            Node::File { name, .. } => name == file,
         }) {
-            None => eprintln!("\x1b[31mError:\x1b[0m Cannot find '{file}'!"),
-            Some(file) => match &mut *file.borrow_mut() {
-                Node::Directory { name, .. } => {
-                    eprintln!("\x1b[31mError:\x1b[0m {name} is not a file!")
+            None => not_found(file),
+            Some(file) => {
+                if let Node::File { content, .. } = &mut *file.borrow_mut() {
+                    *content = new_content.into();
                 }
-                Node::File { content, .. } => *content = new_content.into(),
-            },
+            }
         },
     }
 }
 
 pub fn rm_command(name: &str, work_dir: &RcNode) {
     match &mut *work_dir.borrow_mut() {
-        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m {name} is not a directory!"),
+        Node::File { .. } => work_dir_not_dir(),
         Node::Directory { children, .. } => {
             match children.iter().position(|n| n.borrow().name() == name) {
-                None => eprintln!("\x1b[31mError:\x1b[0m Cannot find {name}!"),
+                None => not_found(name),
                 Some(index) => _ = children.swap_remove(index),
             }
         }
@@ -315,15 +318,15 @@ pub fn rm_command(name: &str, work_dir: &RcNode) {
 
 pub fn mv_command(name: &str, new_name: &str, work_dir: &RcNode) {
     match &*work_dir.borrow() {
-        Node::File { name, .. } => eprintln!("\x1b[31mError:\x1b[0m '{name}' is not a directory!"),
+        Node::File { .. } => work_dir_not_dir(),
         Node::Directory { children, .. } => {
             if children.iter().any(|c| c.borrow().name() == new_name) {
-                eprintln!("\x1b[31mError:\x1b[0m '{new_name}' already exist'");
+                already_exists(new_name);
                 return;
             }
 
             match children.iter().find(|c| c.borrow().name() == name) {
-                None => eprintln!("\x1b[31mError:\x1b[0m Cannot find '{name}'"),
+                None => not_found(name),
                 Some(node) => match &mut *node.borrow_mut() {
                     Node::File { name, .. } => *name = new_name.into(),
                     Node::Directory { name, .. } => *name = new_name.into(),
