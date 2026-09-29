@@ -46,7 +46,7 @@ fn main() {
                 Command::Write(file, content) => node::write_command(&file, &content, &work_dir),
                 Command::Rm(name) => node::rm_command(&name, &work_dir),
                 Command::Mv(name, new_name) => node::mv_command(&name, &new_name, &work_dir),
-                Command::Tree(_dir) => println!("TODO: implement tree"),
+                Command::Tree(dir) => node::tree_command(&dir, &work_dir),
             },
         }
     }

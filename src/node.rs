@@ -335,3 +335,39 @@ pub fn mv_command(name: &str, new_name: &str, work_dir: &RcNode) {
         }
     }
 }
+
+pub fn tree_command(dir: &Option<String>, work_dir: &RcNode) {
+    match dir {
+        None => tree(work_dir),
+        Some(dir) => {
+            if let Ok(dir) = resolve_dir_param(dir, work_dir) {
+                tree(&dir);
+            }
+        }
+    }
+}
+
+fn tree(node: &RcNode) {
+    match &*node.borrow() {
+        Node::File { name, .. } => not_found(name),
+        Node::Directory { name, children, .. } => {
+            println!("{name}");
+            print_tree_children(children, "");
+        }
+    }
+}
+
+fn print_tree_children(children: &[RcNode], padding: &str) {
+    let mut children_iter = children.iter().peekable();
+    while let Some(child) = children_iter.next() {
+        let is_last = children_iter.peek().is_none();
+        let prefix = if is_last { " └─" } else { " ├─" };
+
+        let child = child.borrow();
+        println!("{padding}{prefix}{}", child.name());
+        if let Node::Directory { children, .. } = &*child {
+            let padding = format!("{padding}{}", if is_last { "   " } else { " │ " });
+            print_tree_children(children, &padding);
+        }
+    }
+}
